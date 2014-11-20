@@ -102,6 +102,22 @@ task :run_tests => [:build_tests, :build_payloads, :build_targets] do
 	}
 end
 
+desc "Run the tests again and again until somebody press ^C"
+task :inferno do
+	Rake::Task["bootstrap"].invoke
+	Rake::Task["build_tests"].invoke
+	Rake::Task["build_targets"].invoke
+	Rake::Task["build_payloads"].invoke
+	i = 0
+	while true do
+		Rake::Task["run_tests"].execute
+		puts "test n. #{i}"
+		++i
+	end
+	# won't be reached anyway
+	Rake::Task["cleanup"].invoke
+end
+
 desc "Clean up /build/ directory"
 task :cleanup do
 	system("rm -Rf ./build")
