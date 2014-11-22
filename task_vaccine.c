@@ -77,7 +77,7 @@ thread_act_t vaccine_thread32(task_t target, mach_vm_address_t stack,
                                    mach_vm_address_t dlopen_arg)
 {
 	assert(target), assert(stack), assert(dlopen_arg);
-	// Move to the top (base) of the given stack
+
 	stack += kVaccineRemoteStackSize/2;
 	// Allocate some place for a dummy pthread struct
 	mach_vm_address_t dummy = 0;
@@ -126,7 +126,7 @@ thread_act_t vaccine_thread64(task_t target, mach_vm_address_t stack,
                                    mach_vm_address_t dlopen_arg)
 {
 	assert(target), assert(stack), assert(dlopen_arg);
-	// Move to the top (base) of the given stack
+
 	stack += kVaccineRemoteStackSize;
 	// Allocate some place for a dummy pthread struct
 	mach_vm_address_t dummy = 0;
