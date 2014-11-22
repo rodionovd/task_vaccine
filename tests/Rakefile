@@ -1,157 +1,168 @@
-task :default => [:bootstrap, :run_tests, :cleanup, :exit]
+task :default => ["task_vaccine_tests:bootstrap",
+	"task_vaccine_tests:run_tests", "task_vaccine_tests:cleanup",
+	"task_vaccine_tests:exit"]
+
+namespace :task_vaccine_tests do
 
 # # # # # # # # # # # # # # #
 # SPECS
 # # # # # # # # # # # # # # #
+	if (File.basename(Dir.pwd) == "tests") then
+		TESTS_SOURCES = "tests.c ../task_vaccine.c \
+		                 ../submodules/liblorgnette/lorgnette.c"
+		PAYLOAD_SOURCES = "demo_payload.c"
+		TARGET_SOURCES  = "demo_target.c"
+	else
+		# In case we execute tasks from within the project's main Rakefile
+		TESTS_SOURCES = "./tests/tests.c ./task_vaccine.c \
+		                 ./submodules/liblorgnette/lorgnette.c"
+		PAYLOAD_SOURCES = "./tests/demo_payload.c"
+		TARGET_SOURCES  = "./tests/demo_target.c"
+	end
 
-# Tests
-TESTS_SOURCES = "tests.c ../task_vaccine.c ../submodules/liblorgnette/lorgnette.c"
-TESTS_SHARED_CCFLAGS = ""
-TESTS_NEED_SUDO = true
-test_specs = [
-	{:arch => "i386",   :ccflags => "-O0" },
-	{:arch => "x86_64", :ccflags => "-O0" },
-]
-# Payloads
-PAYLOAD_SOURCES="demo_payload.c"
-payload_specs = [
-	# i386
-	{ :arch => ["i386"], :ccflags => "" },
-	# x86_64
-	{ :arch => ["x86_64"], :ccflags => "" },
-	# Fat (both i386 and x86_64)
-	{ :arch => ["i386", "x86_64"], :ccflags => "" },
-]
-# Demo targets
-TARGET_SOURCES = "demo_target.c"
-target_specs = [
-	{ :arch => "i386",   :ccflags => "" },
-	{ :arch => "x86_64", :ccflags => "" },
-]
+	TESTS_SHARED_CCFLAGS = ""
+	TESTS_NEED_SUDO = true
+	test_specs = [
+		{:arch => "i386",   :ccflags => "-O0" },
+		{:arch => "x86_64", :ccflags => "-O0" },
+	]
+	payload_specs = [
+		# i386
+		{ :arch => ["i386"], :ccflags => "" },
+		# x86_64
+		{ :arch => ["x86_64"], :ccflags => "" },
+		# Fat (both i386 and x86_64)
+		{ :arch => ["i386", "x86_64"], :ccflags => "" },
+	]
+	target_specs = [
+		{ :arch => "i386",   :ccflags => "" },
+		{ :arch => "x86_64", :ccflags => "" },
+	]
 
 # # # # # # # # # # # # # # #
 # TASKS
 # # # # # # # # # # # # # # #
 
-desc "Prepare the environment"
-task :bootstrap do
-	system("mkdir build") if (!File.exists?(Dir.getwd + "/build"))
-end
+	desc "Prepare the environment"
+	task :bootstrap do
+		system("mkdir build") if (!File.exists?(Dir.getwd + "/build"))
+	end
 
-desc "Build tests cases"
-task :build_tests do
-	test_specs.each {|entry|
-		system("clang -arch #{entry[:arch]} \
-			#{TESTS_SHARED_CCFLAGS} \
-			#{entry[:ccflags]} \
-			-o ./build/#{filename_for_test_spec(entry)} \
-			#{TESTS_SOURCES}")
-		if $?.exitstatus == 0 then
-			entry[:result] = true;
-		else
-			entry[:result] = false;
-			puts "Fail to compile test suit: '#{outfile}'. Aborting...".red
+	desc "Build tests cases"
+	task :build_tests do
+		test_specs.each {|entry|
+			system("clang -arch #{entry[:arch]} \
+				#{TESTS_SHARED_CCFLAGS} \
+				#{entry[:ccflags]} \
+				-o ./build/#{filename_for_test_spec(entry)} \
+				#{TESTS_SOURCES}")
+			if $?.exitstatus == 0 then
+				entry[:result] = true;
+			else
+				entry[:result] = false;
+				puts "Fail to compile test suit: '#{outfile}'. Aborting...".red
+			end
+		}
+	end
+
+	desc "Build demo payloads"
+	task :build_payloads do
+		payload_specs.each {|entry|
+			arch_string = "-arch " + entry[:arch].join(" -arch ")
+			system("clang #{arch_string} \
+				-dynamiclib -single_module \
+				-o ./build/#{filename_for_payload_spec(entry)} \
+				#{PAYLOAD_SOURCES}")
+			if $?.exitstatus != 0 then
+				puts "Fail to compile payload: '#{outfile}'. Aborting...".red
+				exit (-1)
+			end
+		}
+	end
+
+	desc "Build demo targets"
+	task :build_targets do
+		target_specs.each {|entry|
+			system("clang -arch #{entry[:arch]} \
+				#{entry[:ccflags]} \
+				-o ./build/#{filename_for_target_spec(entry)} \
+				#{TARGET_SOURCES}")
+			if $?.exitstatus == 0 then
+				entry[:result] = true;
+			else
+				entry[:result] = false;
+				puts "Fail to compile target: '#{outfile}'. Aborting...".red
+			end
+		}
+	end
+
+	desc "Run test cases"
+	task :run_tests => [:build_tests, :build_payloads, :build_targets] do
+		test_specs.each {|entry|
+			if entry[:result] != false then
+				sudo_prefix = "sudo " if TESTS_NEED_SUDO
+				system("#{sudo_prefix}./build/#{filename_for_test_spec(entry)}")
+				entry[:result] = false if $?.exitstatus != 0
+
+				status = (entry[:result] == true) ? "OK".green : "FAIL".red
+				printf "<test suit: %s> %s\n",
+					"#{entry[:arch]}/#{entry[:ccflags].sub(' ', ',')}".brown,
+					status
+			end
+		}
+	end
+
+	desc "Run the tests again and again until somebody hits ^C"
+	task :inferno do
+		Rake::Task["bootstrap"].invoke
+		Rake::Task["build_tests"].invoke
+		Rake::Task["build_targets"].invoke
+		Rake::Task["build_payloads"].invoke
+		i = 0
+		while true do
+			Rake::Task["run_tests"].execute
+			puts "test n. #{i}"
+			++i
 		end
-	}
-end
+		# won't be reached anyway
+		Rake::Task["cleanup"].invoke
+	end
 
-desc "Build demo payloads"
-task :build_payloads do
-	payload_specs.each {|entry|
-		arch_string = "-arch " + entry[:arch].join(" -arch ")
-		system("clang #{arch_string} \
-			-dynamiclib -single_module \
-			-o ./build/#{filename_for_payload_spec(entry)} \
-			#{PAYLOAD_SOURCES}")
-		if $?.exitstatus != 0 then
-			puts "Fail to compile payload: '#{outfile}'. Aborting...".red
+	desc "Clean up /build/ directory"
+	task :cleanup do
+		system("rm -Rf ./build")
+	end
+
+	desc "Finish testing"
+	task :exit => [:run_tests] do
+		if test_specs.index {|e| e[:result] == false} != nil then
 			exit (-1)
-		end
-	}
-end
-
-desc "Build demo targets"
-task :build_targets do
-	target_specs.each {|entry|
-		system("clang -arch #{entry[:arch]} \
-			#{entry[:ccflags]} \
-			-o ./build/#{filename_for_target_spec(entry)} \
-			#{TARGET_SOURCES}")
-		if $?.exitstatus == 0 then
-			entry[:result] = true;
 		else
-			entry[:result] = false;
-			puts "Fail to compile target: '#{outfile}'. Aborting...".red
+			exit (0)
 		end
-	}
-end
-
-desc "Run test cases"
-task :run_tests => [:build_tests, :build_payloads, :build_targets] do
-	test_specs.each {|entry|
-		if entry[:result] != false then
-			sudo_prefix = "sudo " if TESTS_NEED_SUDO
-			system("#{sudo_prefix}./build/#{filename_for_test_spec(entry)}")
-			entry[:result] = false if $?.exitstatus != 0
-
-			status = (entry[:result] == true) ? "OK".green : "FAIL".red
-			printf "<test suit: %s> %s\n",
-				"#{entry[:arch]}/#{entry[:ccflags].sub(' ', ',')}".brown,
-				status
-		end
-	}
-end
-
-desc "Run the tests again and again until somebody press ^C"
-task :inferno do
-	Rake::Task["bootstrap"].invoke
-	Rake::Task["build_tests"].invoke
-	Rake::Task["build_targets"].invoke
-	Rake::Task["build_payloads"].invoke
-	i = 0
-	while true do
-		Rake::Task["run_tests"].execute
-		puts "test n. #{i}"
-		++i
 	end
-	# won't be reached anyway
-	Rake::Task["cleanup"].invoke
-end
-
-desc "Clean up /build/ directory"
-task :cleanup do
-	system("rm -Rf ./build")
-end
-
-desc "Finish testing"
-task :exit => [:run_tests] do
-	if test_specs.index {|e| e[:result] == false} != nil then
-		exit (-1)
-	else
-		exit (0)
-	end
-end
 
 
 # # # # # # # # # # # # # # #
 # MISC
 # # # # # # # # # # # # # # #
-#
-def filename_for_test_spec(s)
-	"tests.#{s[:arch]}#{s[:ccflags].delete(' ')}"
-end
 
-def filename_for_target_spec(s)
-	"target.#{s[:arch]}"
-end
+	def filename_for_test_spec(s)
+		"tests.#{s[:arch]}#{s[:ccflags].delete(' ')}"
+	end
 
-def filename_for_payload_spec(s)
-	"payload.#{s[:arch].join('.')}"
-end
+	def filename_for_target_spec(s)
+		"target.#{s[:arch]}"
+	end
 
-# Colors, Rainbows, Unicorns!
-class String
-	def red;   "\033[1;31m#{self}\033[0m" end
-	def green; "\033[1;32m#{self}\033[0m" end
-	def brown; "\033[0;33m#{self}\033[0m" end
+	def filename_for_payload_spec(s)
+		"payload.#{s[:arch].join('.')}"
+	end
+
+	# Colors, Rainbows, Unicorns!
+	class String
+		def red;   "\033[1;31m#{self}\033[0m" end
+		def green; "\033[1;32m#{self}\033[0m" end
+		def brown; "\033[0;33m#{self}\033[0m" end
+	end
 end
