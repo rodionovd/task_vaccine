@@ -5,11 +5,31 @@
 #include "../task_vaccine.h"
 #include "../submodules/Cegta/Cegta.h"
 
-task_t _launch_target(const char *label);
-void _kill_target(task_t target);
-
 
 SpecBegin(task_vaccine)
+
+task_t (^_launch_target)(const char *) = ^(const char *target) {
+	task_t task = (-1);
+	pid_t pid = fork();
+	if (pid == 0) {
+		execl(target, NULL);
+		fprintf(stderr, "Unable to execv() the target <%s> due to error: %s\n",
+		        target, strerror(errno));
+		exit(EXIT_FAILURE);
+	} else {
+		usleep(60000); // let it initialize a bit
+		int err = task_for_pid(mach_task_self(), pid, &task);
+		assert(err == KERN_SUCCESS);
+	}
+	return (task);
+};
+
+void (^_kill_target)(task_t target) = ^(task_t target) {
+	pid_t pid;
+	int err = pid_for_task(target, &pid);
+	assert(err == KERN_SUCCESS);
+	kill(pid, SIGTERM);
+};
 
 describe("i386 target", ^{
 	__block task_t target = (-1);
@@ -79,34 +99,3 @@ SpecEnd()
 
 
 CegtaRun();
-
-
-#pragma mark - Utils
-
-task_t _launch_target(const char *label)
-{
-	task_t task = (-1);
-
-	pid_t pid = fork();
-	if (pid == 0) {
-		execl(label, NULL);
-		fprintf(stderr, "Unable to execv() the target <%s> due to error: %s\n",
-		        label, strerror(errno));
-		exit(EXIT_FAILURE);
-	} else {
-		usleep(60000); // let it initialize a bit
-		int err = task_for_pid(mach_task_self(), pid, &task);
-		assert(err == KERN_SUCCESS);
-	}
-
-	return (task);
-}
-
-void _kill_target(task_t target)
-{
-	pid_t pid;
-	int err = pid_for_task(target, &pid);
-	assert(err == KERN_SUCCESS);
-
-	kill(pid, SIGTERM);
-}
