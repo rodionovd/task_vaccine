@@ -45,7 +45,7 @@ namespace :task_vaccine_tests do
 
 	desc "Prepare the environment"
 	task :bootstrap do
-		system("mkdir build") if (!File.exists?(Dir.getwd + "/build"))
+		system("mkdir build_tests") if (!File.exists?(Dir.getwd + "/build_tests"))
 	end
 
 	desc "Build tests cases"
@@ -54,7 +54,7 @@ namespace :task_vaccine_tests do
 			system("clang -arch #{entry[:arch]} \
 				#{TESTS_SHARED_CCFLAGS} \
 				#{entry[:ccflags]} \
-				-o ./build/#{filename_for_test_spec(entry)} \
+				-o ./build_tests/#{filename_for_test_spec(entry)} \
 				#{TESTS_SOURCES}")
 			if $?.exitstatus == 0 then
 				entry[:result] = true;
@@ -71,7 +71,7 @@ namespace :task_vaccine_tests do
 			arch_string = "-arch " + entry[:arch].join(" -arch ")
 			system("clang #{arch_string} \
 				-dynamiclib -single_module \
-				-o ./build/#{filename_for_payload_spec(entry)} \
+				-o ./build_tests/#{filename_for_payload_spec(entry)} \
 				#{PAYLOAD_SOURCES}")
 			if $?.exitstatus != 0 then
 				puts "Fail to compile payload: '#{outfile}'. Aborting...".red
@@ -85,7 +85,7 @@ namespace :task_vaccine_tests do
 		target_specs.each {|entry|
 			system("clang -arch #{entry[:arch]} \
 				#{entry[:ccflags]} \
-				-o ./build/#{filename_for_target_spec(entry)} \
+				-o ./build_tests/#{filename_for_target_spec(entry)} \
 				#{TARGET_SOURCES}")
 			if $?.exitstatus == 0 then
 				entry[:result] = true;
@@ -101,7 +101,7 @@ namespace :task_vaccine_tests do
 		test_specs.each {|entry|
 			if entry[:result] != false then
 				sudo_prefix = "sudo " if TESTS_NEED_SUDO
-				system("#{sudo_prefix}./build/#{filename_for_test_spec(entry)}")
+				system("#{sudo_prefix}./build_tests/#{filename_for_test_spec(entry)}")
 				entry[:result] = false if $?.exitstatus != 0
 
 				status = (entry[:result] == true) ? "OK".green : "FAIL".red
@@ -130,7 +130,7 @@ namespace :task_vaccine_tests do
 
 	desc "Clean up /build/ directory"
 	task :cleanup do
-		system("rm -Rf ./build")
+		system("rm -Rf ./build_tests")
 	end
 
 	desc "Finish testing"

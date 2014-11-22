@@ -35,7 +35,7 @@ describe("i386 target", ^{
 	__block task_t target = (-1);
 
 	beforeEach(^(const char *it) {
-		target = _launch_target("./build/target.i386");
+		target = _launch_target("./build_tests/target.i386");
 	});
 
 	afterEach(^(const char *it) {
@@ -45,19 +45,19 @@ describe("i386 target", ^{
 	it("should be injected with i386 payload", ^{
 		requireInt(target, notToBe(-1));
 
-		int err = task_vaccine(target, "./build/payload.i386");
+		int err = task_vaccine(target, "./build_tests/payload.i386");
 		expectInt(err, toBe(KERN_SUCCESS));
 	});
 	it("should be injected with FAT payload", ^{
 		requireInt(target, notToBe(-1));
 
-		int err = task_vaccine(target, "./build/payload.i386.x86_64");
+		int err = task_vaccine(target, "./build_tests/payload.i386.x86_64");
 		expectInt(err, toBe(KERN_SUCCESS));
 	});
 	it("should NOT be injected with x86_64 payload", ^{
 		requireInt(target, notToBe(-1));
 
-		int err = task_vaccine(target, "./build/payload.x86_64");
+		int err = task_vaccine(target, "./build_tests/payload.x86_64");
 		expectInt(err, toBe(KERN_INVALID_TASK));
 	});
 });
@@ -67,7 +67,7 @@ describe("x86_64 target",^{
 	__block task_t target = (-1);
 
 	beforeEach(^(const char *it) {
-		target = _launch_target("./build/target.x86_64");
+		target = _launch_target("./build_tests/target.x86_64");
  	});
 
  	afterEach(^(const char *it) {
@@ -77,20 +77,20 @@ describe("x86_64 target",^{
 	it("should be injected with x86_64 payload", ^{
 		requireInt(target, notToBe(-1));
 
-		int err = task_vaccine(target, "./build/payload.x86_64");
+		int err = task_vaccine(target, "./build_tests/payload.x86_64");
 		expectInt(err, toBe(KERN_SUCCESS));
 	});
 	it("should be injected with FAT payload", ^{
 		requireInt(target, notToBe(-1));
 
-		int err = task_vaccine(target, "./build/payload.i386.x86_64");
+		int err = task_vaccine(target, "./build_tests/payload.i386.x86_64");
 		expectInt(err, toBe(KERN_SUCCESS));
 	});
 
 	it("should NOT be injected with i386 payload", ^{
 		requireInt(target, notToBe(-1));
 
-		int err = task_vaccine(target, "./build/payload.i386");
+		int err = task_vaccine(target, "./build_tests/payload.i386");
 		expectInt(err, toBe(KERN_INVALID_TASK));
 	});
 });
