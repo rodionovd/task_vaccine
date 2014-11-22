@@ -3,7 +3,7 @@ task :default => ["task_vaccine_tests:bootstrap",
 	"task_vaccine_tests:exit"]
 
 namespace :task_vaccine_tests do
-
+	task :default => [:bootstrap, :run_tests, :cleanup, :exit]
 # # # # # # # # # # # # # # #
 # SPECS
 # # # # # # # # # # # # # # #
