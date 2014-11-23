@@ -13,6 +13,8 @@ $ rake build # will build an x86_64 dynamic library and place it into ./build/x8
 ```
 
 ```c
+#include "task_vaccine.h"
+
 task_t target = ...;
 int err = task_vaccine(target, "./payload0.dylib");
 if (err != KERN_SUCCESS) {
