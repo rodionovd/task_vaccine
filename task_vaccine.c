@@ -103,7 +103,7 @@ thread_act_t vaccine_thread32(task_t target, mach_vm_address_t stack,
 	// functions (such as dlopen()) rely on pthread stuff (locks, etc), so we
 	// have to initialize a pthread first and only then execute dlopen() for
 	// loading the payload.
-
+	//
 	// As for OS X 10.9/10.10 there're two system libraries containing
 	// _pthread_set_self symbol:
 	// (1) libsystem_kernel.dylib and (2) libsystem_pthread.dylib.
@@ -159,9 +159,7 @@ thread_act_t vaccine_thread64(task_t target, mach_vm_address_t stack,
 	x86_thread_state64_t state;
 	memset(&state, 0, sizeof(state));
 	// See a comment in vaccine_thread32() about why we refer to some strange
-	// pthread thing instead of dlopen() here.
-
-	// See a long comment in vaccine_thread32() about why we need to explicitly
+	// pthread thing instead of dlopen() here, and also why we need to explicitly
 	// specify the source image name here
 	uint64_t entrypoint = lorgnette_lookup_image(target, "_pthread_set_self",
 	                                             "libsystem_pthread.dylib");
