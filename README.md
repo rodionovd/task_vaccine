@@ -5,6 +5,13 @@ Yet another code injection library for OS X.
 
 #### TL;DR
 
+```sh
+$ git clone --recursive https://github.com/rodionovd/task_vaccine.git task_vaccine
+$ cd ./task_vaccine
+$ rake test
+$ rake build # will build an x86_64 dynamic library and place it into ./build/x86_64
+```
+
 ```c
 task_t target = ...;
 int err = task_vaccine(target, "./payload0.dylib");
