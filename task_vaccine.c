@@ -454,6 +454,7 @@ kern_return_t catch_x86_64_exception(task_t task, mach_port_t thread,
 		return KERN_FAILURE;
 	}
 	// Well, setup a thread to execute dlopen() with a given library path
+	memcpy(out_state, in_state, sizeof(*in_state));
 	uint64_t dlopen_addr = lorgnette_lookup(task, "dlopen");
 	out_state->__rip = dlopen_addr;
 	out_state->__rsi = RTLD_NOW | RTLD_LOCAL;
