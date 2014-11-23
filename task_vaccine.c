@@ -1,17 +1,15 @@
 // task_vaccine.c
 // Copyright (c) 2014 Dmitry Rodionov
+// https://github.com/rodionovd/task_vaccine
 //
 // This software may be modified and distributed under the terms
 // of the MIT license.  See the LICENSE file for details.
-//
+
 #include <dlfcn.h>
 #include <syslog.h>
 #include <assert.h>
-#include <pthread.h>
 #include <sys/sysctl.h>
 #include <mach/mach_vm.h>
-#include <mach/thread_act.h>
-#include <mach/thread_info.h>
 
 #include "task_vaccine.h"
 #include "submodules/liblorgnette/lorgnette.h"
@@ -20,12 +18,12 @@
 #define kVaccineJumpToDlopenReturnValue (0xabad1dea)
 #define kVaccineFinishReturnValue       (0xdead1dea)
 
-#define VaccineReturnZeroOnError(func) \
+#define VaccineReturnNegativeTwoOnError(func) \
 	do { \
 		if (err != KERN_SUCCESS) { \
 			syslog(LOG_NOTICE, "[%d] "#func"() failed: %d (%s)\n", __LINE__-3, \
 			        err, mach_error_string(err)); \
-			return (0); \
+			return (-2); \
 		} \
 	} while (0)
 
@@ -45,6 +43,9 @@ typedef struct {
     char pad[512];
 } exc_msg_t;
 
+/**
+ *
+ */
 static
 thread_state_flavor_t task_thread_flavor(task_t target)
 {
@@ -72,6 +73,9 @@ thread_state_flavor_t task_thread_flavor(task_t target)
     }
 }
 
+/**
+ *
+ */
 static
 thread_act_t vaccine_thread32(task_t target, mach_vm_address_t stack,
                                    mach_vm_address_t dlopen_arg)
@@ -83,7 +87,7 @@ thread_act_t vaccine_thread32(task_t target, mach_vm_address_t stack,
 	mach_vm_address_t dummy = 0;
 	int err = mach_vm_allocate(target, &dummy, sizeof(struct _opaque_pthread_t),
 	                           VM_FLAGS_ANYWHERE);
-	VaccineReturnZeroOnError(mach_vm_allocate);
+	VaccineReturnNegativeTwoOnError(mach_vm_allocate);
 	// Place a fake return address and this dummy struct into the stack
 	uint32_t local_stack[] = {
 		 kVaccineJumpToDlopenReturnValue, (uint32_t)dummy
@@ -91,36 +95,49 @@ thread_act_t vaccine_thread32(task_t target, mach_vm_address_t stack,
 	size_t local_stack_size = sizeof(local_stack);
 	err = mach_vm_write(target, stack,
 	                    (vm_offset_t)local_stack, local_stack_size);
-	VaccineReturnZeroOnError(mach_vm_write);
+	VaccineReturnNegativeTwoOnError(mach_vm_write);
 	// Initialize an i386 thread state
 	x86_thread_state32_t state;
 	memset(&state, 0, sizeof(state));
-	// (EIP) <- remote _pthread_set_self() location
+	// We can only create a raw Mach thread inside a target task. But many
+	// functions (such as dlopen()) rely on pthread stuff (locks, etc), so we
+	// have to initialize a pthread first and only then execute dlopen() for
+	// loading the payload.
 #if defined(__i386__)
 	uint32_t entrypoint = (uint32_t)dlsym(RTLD_DEFAULT, "_pthread_set_self");
 #else
+	// As for OS X 10.9/10.10 there're two system libraries containing
+	// _pthread_set_self symbol:
+	// (1) libsystem_kernel.dylib and (2) libsystem_pthread.dylib.
+	// In the former one is a no-op function (not exported actually) while the
+	// latter holds the real (exported) symbol.
+	// Since liblorgnette doesn't care about symbols publicity we have to
+	// explicitly specify the source image for a symbol here. Otherwise it can
+	// return an address of the no-op variant.
 	uint32_t entrypoint = lorgnette_lookup_image(target, "_pthread_set_self",
 	                                             "libsystem_pthread.dylib");
 #endif
 	if (entrypoint == 0) err = KERN_FAILURE;
-	VaccineReturnZeroOnError(entrypoint);
+	VaccineReturnNegativeTwoOnError(entrypoint);
 	state.__eip = entrypoint;
 	// (ESP) <- stack pointer
 	state.__esp = stack;
 	// (EBX) <- dlopen_arg
-	state.__ebp = stack + kVaccineRemoteStackSize/2;
 	state.__ebx = dlopen_arg;
 
 	thread_act_t thread;
 	err = thread_create(target, &thread);
-	VaccineReturnZeroOnError(thread_create);
+	VaccineReturnNegativeTwoOnError(thread_create);
 	err = thread_set_state(thread, x86_THREAD_STATE32, (thread_state_t)&state,
 	                       x86_THREAD_STATE32_COUNT);
-	VaccineReturnZeroOnError(thread_set_state);
+	VaccineReturnNegativeTwoOnError(thread_set_state);
 
 	return thread;
 }
 
+/**
+ *
+ */
 static
 thread_act_t vaccine_thread64(task_t target, mach_vm_address_t stack,
                                    mach_vm_address_t dlopen_arg)
@@ -132,7 +149,7 @@ thread_act_t vaccine_thread64(task_t target, mach_vm_address_t stack,
 	mach_vm_address_t dummy = 0;
 	int err = mach_vm_allocate(target, &dummy, sizeof(struct _opaque_pthread_t),
 	                           VM_FLAGS_ANYWHERE);
-	VaccineReturnZeroOnError(mach_vm_allocate);
+	VaccineReturnNegativeTwoOnError(mach_vm_allocate);
 	// Place a fake return address onto the stack
 	uint64_t local_stack[] = {
 		kVaccineJumpToDlopenReturnValue
@@ -140,29 +157,22 @@ thread_act_t vaccine_thread64(task_t target, mach_vm_address_t stack,
 	size_t local_stack_size = sizeof(local_stack);
 	err = mach_vm_write(target, (stack - local_stack_size),
 	                    (vm_offset_t)local_stack, local_stack_size);
-	VaccineReturnZeroOnError(mach_vm_write);
+	VaccineReturnNegativeTwoOnError(mach_vm_write);
 	// Iinitilize an x86_64 thread state
 	x86_thread_state64_t state;
 	memset(&state, 0, sizeof(state));
-	// (RIP) <-  remote _pthread_set_self() location
+	// See a comment in vaccine_thread32() about why we refer to some strange
+	// pthread thing instead of dlopen() here.
 #if defined(__x86_64__)
 	uint64_t entrypoint = (uint64_t)dlsym(RTLD_DEFAULT, "_pthread_set_self");
 #else
-	/**
-	 * As for OS X 10.9 there're two system libraries which contain
-	 * _pthread_set_self symbol:
-	 * (1) libsystem_kernel.dylib and (2) libsystem_pthread.dylib.
-	 * In the former one is a no-op function while the latter holds the real
-	 * symbol.
-	 * Since dyld loads libsystem_kernel.dylib before libsystem_pthread.dylib,
-	 * lorgnette_lookup() consumes its no-op variant of _pthread_set_self, so
-	 * if we want to get a real function address, we must specify the right
-	 * image name. */
+	// See a long comment in vaccine_thread32() about why we need to explicitly
+	// specify the source image name here
 	uint64_t entrypoint = lorgnette_lookup_image(target, "_pthread_set_self",
 	                                             "libsystem_pthread.dylib");
 #endif
 	if (entrypoint == 0) err = KERN_FAILURE;
-	VaccineReturnZeroOnError(entrypoint);
+	VaccineReturnNegativeTwoOnError(entrypoint);
 	state.__rip = entrypoint;
 	// (RDI) <- dummy pthread struct
 	state.__rdi = dummy;
@@ -174,18 +184,23 @@ thread_act_t vaccine_thread64(task_t target, mach_vm_address_t stack,
 
 	thread_act_t thread;
 	err = thread_create(target, &thread);
-	VaccineReturnZeroOnError(thread_create);
+	VaccineReturnNegativeTwoOnError(thread_create);
 	err = thread_set_state(thread, x86_THREAD_STATE64, (thread_state_t)&state,
 	                       x86_THREAD_STATE64_COUNT);
-	VaccineReturnZeroOnError(thread_set_state);
+	VaccineReturnNegativeTwoOnError(thread_set_state);
 
 	return thread;
 }
 
+/**
+ * Waits for a single exception on |exception_port| and returns.
+ * For return value see mach_msg_server_once().
+ */
 static
 kern_return_t vaccine_catch_exception(mach_port_t exception_port)
 {
 	assert(exception_port);
+
 	extern boolean_t exc_server(mach_msg_header_t *request,
 	                            mach_msg_header_t *reply);
 	kern_return_t err = mach_msg_server_once(exc_server, sizeof(exc_msg_t),
@@ -193,6 +208,13 @@ kern_return_t vaccine_catch_exception(mach_port_t exception_port)
 	return err;
 }
 
+/**
+ * Verifies that the given |thread| was suspended.
+ * Writes (1) into |status| if it was, (0) otherwise.
+ *
+ * @return a positive number if thread_info() fails for |thread|
+ * @return KERN_SUCCESS otherwise
+ */
 static
 kern_return_t thread_was_suspended(thread_act_t thread, int *status)
 {
@@ -208,6 +230,11 @@ kern_return_t thread_was_suspended(thread_act_t thread, int *status)
 	return KERN_SUCCESS;
 }
 
+/**
+ * Fetches a value of |EAX| (or |RAX|) register from the given |thread|'s state.
+ * It's flavor is defined by |flavor| argument: it should be either
+ * x86_THREAD_STATE32 or x86_THREAD_STATE64.
+ */
 static
 int64_t thread_get_ax_register(thread_act_t thread, thread_state_flavor_t flavor)
 {
@@ -221,7 +248,7 @@ int64_t thread_get_ax_register(thread_act_t thread, thread_state_flavor_t flavor
 			mach_msg_type_number_t count = x86_THREAD_STATE32_COUNT;
 			err = thread_get_state(thread, x86_THREAD_STATE32,
 			                       (thread_state_t)&state, &count);
-			VaccineReturnZeroOnError(thread_get_state);
+			VaccineReturnNegativeTwoOnError(thread_get_state);
 			int32_t tmp = (int32_t)state.__eax;
 			ax = tmp;
 		} else {
@@ -229,7 +256,7 @@ int64_t thread_get_ax_register(thread_act_t thread, thread_state_flavor_t flavor
 			mach_msg_type_number_t count = x86_THREAD_STATE64_COUNT;
 			err = thread_get_state(thread, x86_THREAD_STATE64,
 			                       (thread_state_t)&state, &count);
-			VaccineReturnZeroOnError(thread_get_state);
+			VaccineReturnNegativeTwoOnError(thread_get_state);
 			int64_t tmp = (int64_t)state.__rax;
 			ax = tmp;
 		}
@@ -237,6 +264,16 @@ int64_t thread_get_ax_register(thread_act_t thread, thread_state_flavor_t flavor
 	return ax;
 }
 
+/**
+ * Loads a dynamic library at |shared_library_path| into the given |target|.
+ *
+ * @discussion
+ * It calls  dlopen() inside a target by creating a remote thread, setting an
+ * expection handler on it and catching any (expected) exceptions for rewinding
+ * the thread.
+ *
+ * @return see dlopen() return value.
+ */
 static
 int64_t task_loadlib(task_t target, const char *shared_library_path)
 {
@@ -248,54 +285,54 @@ int64_t task_loadlib(task_t target, const char *shared_library_path)
 	mach_vm_address_t remote_path = 0;
 	int err = mach_vm_allocate(target, &remote_path, remote_path_len,
 	                           VM_FLAGS_ANYWHERE);
-	VaccineReturnZeroOnError(mach_vm_allocate);
+	VaccineReturnNegativeTwoOnError(mach_vm_allocate);
 	// Copy the payload path string into the target address space
 	err = mach_vm_write(target, remote_path, (vm_offset_t)shared_library_path,
 	                    (mach_msg_type_number_t)remote_path_len);
-	VaccineReturnZeroOnError(mach_vm_write);
+	VaccineReturnNegativeTwoOnError(mach_vm_write);
 	// Allocate a remote stack (see kVaccineRemoteStackSize)
 	mach_vm_address_t remote_stack = 0;
 	err = mach_vm_allocate(target, &remote_stack, kVaccineRemoteStackSize,
 	                       VM_FLAGS_ANYWHERE);
-	VaccineReturnZeroOnError(mach_vm_allocate);
+	VaccineReturnNegativeTwoOnError(mach_vm_allocate);
 	// Configure a remote thread
 	thread_act_t remote_thread = {0};
 	thread_state_flavor_t flavor = task_thread_flavor(target);
-	err = (flavor == -1 ? KERN_FAILURE : KERN_SUCCESS);
-	VaccineReturnZeroOnError(task_thread_flavor);
+	if (flavor == -1) err = KERN_FAILURE;
+	VaccineReturnNegativeTwoOnError(task_thread_flavor);
 
 	if (flavor == x86_THREAD_STATE32) {
 		remote_thread = vaccine_thread32(target, remote_stack, remote_path);
 	} else {
 		remote_thread = vaccine_thread64(target, remote_stack, remote_path);
 	}
-	err = (remote_thread ? KERN_SUCCESS : KERN_FAILURE);
-	VaccineReturnZeroOnError(task_vaccine_threadXX);
+	if (!remote_thread) err = KERN_FAILURE;
+	VaccineReturnNegativeTwoOnError(task_vaccine_threadXX);
 
 	// Setup an exception port for the thread
 	mach_port_t exception_port = 0;
 	err = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE,
 	                         &exception_port);
-	VaccineReturnZeroOnError(mach_port_allocate);
+	VaccineReturnNegativeTwoOnError(mach_port_allocate);
 	err = mach_port_insert_right(mach_task_self(), exception_port,
                                  exception_port, MACH_MSG_TYPE_MAKE_SEND);
-	VaccineReturnZeroOnError(mach_port_insert_right);
+	VaccineReturnNegativeTwoOnError(mach_port_insert_right);
 	err = thread_set_exception_ports(remote_thread, EXC_MASK_BAD_ACCESS,
 	                                 exception_port, EXCEPTION_STATE_IDENTITY,
 	                                 flavor);
-	VaccineReturnZeroOnError(thread_set_exception_ports);
+	VaccineReturnNegativeTwoOnError(thread_set_exception_ports);
 
 	err = thread_resume(remote_thread);
-	VaccineReturnZeroOnError(thread_resume);
+	VaccineReturnNegativeTwoOnError(thread_resume);
 
 	// Run the exception handling loop
 	int64_t return_value = 0;
 	while (1) {
 		err = vaccine_catch_exception(exception_port);
-		VaccineReturnZeroOnError(vaccine_catch_exception);
+		VaccineReturnNegativeTwoOnError(vaccine_catch_exception);
 		int suspended = 0;
 		err = thread_was_suspended(remote_thread, &suspended);
-		VaccineReturnZeroOnError(thread_was_suspended);
+		VaccineReturnNegativeTwoOnError(thread_was_suspended);
 		if (!suspended) continue;
 
 		// OK, so our remote thread is done and we can grab a dlopen()
@@ -303,13 +340,13 @@ int64_t task_loadlib(task_t target, const char *shared_library_path)
 		return_value = thread_get_ax_register(remote_thread, flavor);
 		// aaaaaand we've done our trip! Let's clean everything up
 		err = thread_terminate(remote_thread);
-		VaccineReturnZeroOnError(thread_terminate);
+		VaccineReturnNegativeTwoOnError(thread_terminate);
 		err = mach_vm_deallocate(target, remote_path, remote_path_len);
-		VaccineReturnZeroOnError(mach_vm_deallocate);
+		VaccineReturnNegativeTwoOnError(mach_vm_deallocate);
 		err = mach_vm_deallocate(target, remote_stack, kVaccineRemoteStackSize);
-		VaccineReturnZeroOnError(mach_vm_deallocate);
+		VaccineReturnNegativeTwoOnError(mach_vm_deallocate);
 		err = mach_port_deallocate(mach_task_self(), exception_port);
-		VaccineReturnZeroOnError(mach_port_deallocate);
+		VaccineReturnNegativeTwoOnError(mach_port_deallocate);
 		// bye!
 		break;
 	}
@@ -317,32 +354,59 @@ int64_t task_loadlib(task_t target, const char *shared_library_path)
 	return return_value;
 }
 
-
+/**
+ * Injects a dynamic library at |payload_path| into the given |target|.
+ *
+ * @return KERN_SUCCESS
+ *     The payload was loaded successfully into the target task.
+ * @return KERN_FAILURE
+ *     Something gone totally wrong on a task_vaccine’s side.
+ * @return KERN_INVALID_TASK
+ *     dlopen() was unable to load the given library into the given target
+ *     (because of invalid library path, invalid target architecture, etc).
+ */
 kern_return_t task_vaccine(task_t target, const char *payload_path)
 {
 	assert(target);
 	assert(payload_path);
 
 	int64_t return_value = task_loadlib(target, payload_path);
-	// syslog(LOG_NOTICE, "erturn_value = %d\n", return_value);
+	// dlopen() should return a library handle pointer which is greater than zero
 	if (return_value > 0) {
-		// dlopen() should return a library handle pointer
-		// which is greater than zero
 		return KERN_SUCCESS;
-	} else {
+	} else if (return_value == 0) {
+		// dlopen() retruns zero when it can't load a library
 		return KERN_INVALID_TASK;
 	}
 
-	return KERN_ABORTED;
+	return KERN_FAILURE;
 }
 
+/**
+ * Catches an i386 thread exception and reconfigurates it to either call
+ * dlopen() on it or suspend it, so task_vaccine() can finish it's job.
+ *
+ * @return general Mach exception handler errors:
+ *
+ * KERN_SUCCESS indicates that we've reset a thread's state and it's ready to
+ * be resumed.
+ *
+ * MIG_NO_REPLY indicates that we've terminated or suspended the thread, so the
+ * kernel won't handle it anymore. This one also breaks our exception handling
+ * loop, so we able to finish the injection process.
+ *
+ * KERN_FAILURE indicates that we weren't expecting this kind of exception and
+ * the kernel should take care of it.
+ */
+static
 kern_return_t catch_i386_exception(task_t task, mach_port_t thread,
                                    x86_thread_state32_t *in_state,
                                    x86_thread_state32_t *out_state)
 {
+	assert(task), assert(thread), assert(in_state), assert(out_state);
+
 	if (in_state->__eip == kVaccineFinishReturnValue) {
 		// OK, Glass, finish here
-		syslog(LOG_NOTICE, "ret: %d",(int32_t)in_state->__eax);
 		thread_suspend(thread);
 		return MIG_NO_REPLY;
 	} else if (in_state->__eip != kVaccineJumpToDlopenReturnValue) {
@@ -381,10 +445,16 @@ kern_return_t catch_i386_exception(task_t task, mach_port_t thread,
 	return KERN_SUCCESS;
 }
 
+/**
+ * @see catch_i386_exception()
+ */
+static
 kern_return_t catch_x86_64_exception(task_t task, mach_port_t thread,
                                      x86_thread_state64_t *in_state,
                                      x86_thread_state64_t *out_state)
 {
+	assert(task), assert(thread), assert(in_state), assert(out_state);
+
 	if (in_state->__rip == kVaccineFinishReturnValue) {
 		// OK, Glass, finish here
 		thread_suspend(thread);
@@ -420,6 +490,9 @@ kern_return_t catch_x86_64_exception(task_t task, mach_port_t thread,
 	return KERN_SUCCESS;
 }
 
+/**
+ * see catch_i386_exception() and catch_x86_64_exception()
+ */
 __attribute__((visibility("default")))
 kern_return_t
 catch_exception_raise_state_identity(mach_port_t exception_port,
@@ -451,6 +524,6 @@ catch_exception_raise_state_identity(mach_port_t exception_port,
 		return catch_i386_exception(task, thread, in_state32, out_state32);
 	}
 
-	// Don't care
+	// Don't care about non-Intel. Let the kernel handle it.
 	return KERN_FAILURE;
 }
