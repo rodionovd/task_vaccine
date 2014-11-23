@@ -103,9 +103,7 @@ thread_act_t vaccine_thread32(task_t target, mach_vm_address_t stack,
 	// functions (such as dlopen()) rely on pthread stuff (locks, etc), so we
 	// have to initialize a pthread first and only then execute dlopen() for
 	// loading the payload.
-#if defined(__i386__)
-	uint32_t entrypoint = (uint32_t)dlsym(RTLD_DEFAULT, "_pthread_set_self");
-#else
+	//
 	// As for OS X 10.9/10.10 there're two system libraries containing
 	// _pthread_set_self symbol:
 	// (1) libsystem_kernel.dylib and (2) libsystem_pthread.dylib.
@@ -116,7 +114,6 @@ thread_act_t vaccine_thread32(task_t target, mach_vm_address_t stack,
 	// return an address of the no-op variant.
 	uint32_t entrypoint = lorgnette_lookup_image(target, "_pthread_set_self",
 	                                             "libsystem_pthread.dylib");
-#endif
 	if (entrypoint == 0) err = KERN_FAILURE;
 	VaccineReturnNegativeTwoOnError(entrypoint);
 	state.__eip = entrypoint;
@@ -162,15 +159,10 @@ thread_act_t vaccine_thread64(task_t target, mach_vm_address_t stack,
 	x86_thread_state64_t state;
 	memset(&state, 0, sizeof(state));
 	// See a comment in vaccine_thread32() about why we refer to some strange
-	// pthread thing instead of dlopen() here.
-#if defined(__x86_64__)
-	uint64_t entrypoint = (uint64_t)dlsym(RTLD_DEFAULT, "_pthread_set_self");
-#else
-	// See a long comment in vaccine_thread32() about why we need to explicitly
+	// pthread thing instead of dlopen() here, and also why we need to explicitly
 	// specify the source image name here
 	uint64_t entrypoint = lorgnette_lookup_image(target, "_pthread_set_self",
 	                                             "libsystem_pthread.dylib");
-#endif
 	if (entrypoint == 0) err = KERN_FAILURE;
 	VaccineReturnNegativeTwoOnError(entrypoint);
 	state.__rip = entrypoint;
@@ -415,11 +407,7 @@ kern_return_t catch_i386_exception(task_t task, mach_port_t thread,
 	}
 	// Well, setup a thread to execute dlopen() with a given library path
 	memcpy(out_state, in_state, sizeof(*in_state));
-#if defined(__i386__)
-	uint32_t dlopen_addr = (uint32_t)dlsym(RTLD_DEFAULT, "dlopen");
-#else
 	uint32_t dlopen_addr = lorgnette_lookup(task, "dlopen");
-#endif
 	out_state->__eip = dlopen_addr;
 	out_state->__esp = ({
 		// Our previous function added 4 to our stck pointer, discard this
@@ -464,11 +452,8 @@ kern_return_t catch_x86_64_exception(task_t task, mach_port_t thread,
 		return KERN_FAILURE;
 	}
 	// Well, setup a thread to execute dlopen() with a given library path
-#if defined(__x86_64__)
-	uint64_t dlopen_addr = (uint64_t)dlsym(RTLD_DEFAULT, "dlopen");
-#else
+	memcpy(out_state, in_state, sizeof(*in_state));
 	uint64_t dlopen_addr = lorgnette_lookup(task, "dlopen");
-#endif
 	out_state->__rip = dlopen_addr;
 	out_state->__rsi = RTLD_NOW | RTLD_LOCAL;
 	out_state->__rdi = in_state->__rbx; // we hold a library path here
