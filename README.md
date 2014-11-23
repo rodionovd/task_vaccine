@@ -1,4 +1,6 @@
-## task_vaccine
+## task_vaccine  
+
+[![Build Status](https://travis-ci.org/rodionovd/task_vaccine.svg?branch=master)](https://travis-ci.org/rodionovd/task_vaccine)
 
 Yet another code injection library for OS X.
 
