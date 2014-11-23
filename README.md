@@ -78,5 +78,5 @@ kern_return_t task_vaccine(task_t target, const char *payload_path);
 
 If you found any bug(s) or something, please open an issue or a pull request — I'd appreciate your help! (^,,^)
 
-Dmitry Rodionov, 2014
+Dmitry Rodionov, 2014  
 i.am.rodionovd@gmail.com
