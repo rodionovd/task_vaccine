@@ -1,0 +1,6 @@
+[submodule "submodules/liblorgnette"]
+	path = submodules/liblorgnette
+	url = https://github.com/rodionovd/liblorgnette.git
+[submodule "submodules/Cegta"]
+	path = submodules/Cegta
+	url = https://github.com/rodionovd/Cegta.git
