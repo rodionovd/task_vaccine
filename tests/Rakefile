@@ -118,11 +118,11 @@ namespace :task_vaccine_tests do
 		Rake::Task["task_vaccine_tests:build_tests"].invoke
 		Rake::Task["task_vaccine_tests:build_targets"].invoke
 		Rake::Task["task_vaccine_tests:build_payloads"].invoke
-		i = 0
+		i = 1
 		while true do
 			Rake::Task["task_vaccine_tests:run_tests"].execute
 			puts "test n. #{i}"
-			++i
+			i = i+1
 		end
 		# won't be reached anyway
 		Rake::Task["task_vaccine_tests:cleanup"].invoke
