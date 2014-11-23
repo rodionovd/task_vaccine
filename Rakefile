@@ -8,6 +8,10 @@ $status = 0
 TESTS_NAMESPACE = "task_vaccine_tests"
 import "#{Dir.pwd}/tests/Rakefile"
 
+desc "Initialize and update submodules"
+task :bootstrap do
+	system("git submodule update --init");
+end
 
 desc "Clean up the environment"
 task :clear do
