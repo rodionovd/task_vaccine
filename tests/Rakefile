@@ -114,18 +114,18 @@ namespace :task_vaccine_tests do
 
 	desc "Run the tests again and again until somebody hits ^C"
 	task :inferno do
-		Rake::Task["bootstrap"].invoke
-		Rake::Task["build_tests"].invoke
-		Rake::Task["build_targets"].invoke
-		Rake::Task["build_payloads"].invoke
+		Rake::Task["task_vaccine_tests:bootstrap"].invoke
+		Rake::Task["task_vaccine_tests:build_tests"].invoke
+		Rake::Task["task_vaccine_tests:build_targets"].invoke
+		Rake::Task["task_vaccine_tests:build_payloads"].invoke
 		i = 0
 		while true do
-			Rake::Task["run_tests"].execute
+			Rake::Task["task_vaccine_tests:run_tests"].execute
 			puts "test n. #{i}"
 			++i
 		end
 		# won't be reached anyway
-		Rake::Task["cleanup"].invoke
+		Rake::Task["task_vaccine_tests:cleanup"].invoke
 	end
 
 	desc "Clean up /build/ directory"
