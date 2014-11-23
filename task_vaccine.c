@@ -409,11 +409,7 @@ kern_return_t catch_i386_exception(task_t task, mach_port_t thread,
 	}
 	// Well, setup a thread to execute dlopen() with a given library path
 	memcpy(out_state, in_state, sizeof(*in_state));
-#if defined(__i386__)
-	uint32_t dlopen_addr = (uint32_t)dlsym(RTLD_DEFAULT, "dlopen");
-#else
 	uint32_t dlopen_addr = lorgnette_lookup(task, "dlopen");
-#endif
 	out_state->__eip = dlopen_addr;
 	out_state->__esp = ({
 		// Our previous function added 4 to our stck pointer, discard this
@@ -458,11 +454,7 @@ kern_return_t catch_x86_64_exception(task_t task, mach_port_t thread,
 		return KERN_FAILURE;
 	}
 	// Well, setup a thread to execute dlopen() with a given library path
-#if defined(__x86_64__)
-	uint64_t dlopen_addr = (uint64_t)dlsym(RTLD_DEFAULT, "dlopen");
-#else
 	uint64_t dlopen_addr = lorgnette_lookup(task, "dlopen");
-#endif
 	out_state->__rip = dlopen_addr;
 	out_state->__rsi = RTLD_NOW | RTLD_LOCAL;
 	out_state->__rdi = in_state->__rbx; // we hold a library path here
