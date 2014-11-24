@@ -14,7 +14,7 @@
 #include "task_vaccine.h"
 #include "submodules/liblorgnette/lorgnette.h"
 
-#define kVaccineRemoteStackSize (50*1024)
+#define kVaccineRemoteStackSize (30*1024)
 #define kVaccineJumpToDlopenReturnValue (0xabad1dea)
 #define kVaccineFinishReturnValue       (0xdead1dea)
 
@@ -408,7 +408,6 @@ kern_return_t catch_i386_exception(task_t task, mach_port_t thread,
 	uint32_t dlopen_addr = lorgnette_lookup(task, "dlopen");
 	out_state->__eip = dlopen_addr;
 	out_state->__esp = ({
-		// Our previous function added 4 to our stack pointer, discard this
 		mach_vm_address_t stack = in_state->__esp - (sizeof(uint32_t));
 		stack -= 4; // simulate the call instruction
 		int mode = RTLD_NOW | RTLD_LOCAL;
