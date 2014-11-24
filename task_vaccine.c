@@ -18,12 +18,13 @@
 #define kVaccineJumpToDlopenReturnValue (0xabad1dea)
 #define kVaccineFinishReturnValue       (0xdead1dea)
 
-#define VaccineReturnNegativeTwoOnError(func) \
+#define kVaccineErrorCode (-2)
+#define VaccineFailOnError(func) \
 	do { \
 		if (err != KERN_SUCCESS) { \
 			syslog(LOG_NOTICE, "[%d] "#func"() failed: %d (%s)\n", __LINE__-3, \
 			        err, mach_error_string(err)); \
-			return (-2); \
+			return kVaccineErrorCode; \
 		} \
 	} while (0)
 
@@ -87,7 +88,7 @@ thread_act_t vaccine_thread32(task_t target, mach_vm_address_t stack,
 	mach_vm_address_t dummy = 0;
 	int err = mach_vm_allocate(target, &dummy, sizeof(struct _opaque_pthread_t),
 	                           VM_FLAGS_ANYWHERE);
-	VaccineReturnNegativeTwoOnError(mach_vm_allocate);
+	VaccineFailOnError(mach_vm_allocate);
 	// Place a fake return address and this dummy struct into the stack
 	uint32_t local_stack[] = {
 		 kVaccineJumpToDlopenReturnValue, (uint32_t)dummy
@@ -95,7 +96,7 @@ thread_act_t vaccine_thread32(task_t target, mach_vm_address_t stack,
 	size_t local_stack_size = sizeof(local_stack);
 	err = mach_vm_write(target, stack,
 	                    (vm_offset_t)local_stack, local_stack_size);
-	VaccineReturnNegativeTwoOnError(mach_vm_write);
+	VaccineFailOnError(mach_vm_write);
 	// Initialize an i386 thread state
 	x86_thread_state32_t state;
 	memset(&state, 0, sizeof(state));
@@ -115,17 +116,17 @@ thread_act_t vaccine_thread32(task_t target, mach_vm_address_t stack,
 	uint32_t entrypoint = lorgnette_lookup_image(target, "_pthread_set_self",
 	                                             "libsystem_pthread.dylib");
 	if (entrypoint == 0) err = KERN_FAILURE;
-	VaccineReturnNegativeTwoOnError(entrypoint);
+	VaccineFailOnError(entrypoint);
 	state.__eip = entrypoint;
 	state.__esp = stack;
 	state.__ebx = dlopen_arg;
 
 	thread_act_t thread;
 	err = thread_create(target, &thread);
-	VaccineReturnNegativeTwoOnError(thread_create);
+	VaccineFailOnError(thread_create);
 	err = thread_set_state(thread, x86_THREAD_STATE32, (thread_state_t)&state,
 	                       x86_THREAD_STATE32_COUNT);
-	VaccineReturnNegativeTwoOnError(thread_set_state);
+	VaccineFailOnError(thread_set_state);
 
 	return thread;
 }
@@ -144,7 +145,7 @@ thread_act_t vaccine_thread64(task_t target, mach_vm_address_t stack,
 	mach_vm_address_t dummy = 0;
 	int err = mach_vm_allocate(target, &dummy, sizeof(struct _opaque_pthread_t),
 	                           VM_FLAGS_ANYWHERE);
-	VaccineReturnNegativeTwoOnError(mach_vm_allocate);
+	VaccineFailOnError(mach_vm_allocate);
 	// Place a fake return address onto the stack
 	uint64_t local_stack[] = {
 		kVaccineJumpToDlopenReturnValue
@@ -152,7 +153,7 @@ thread_act_t vaccine_thread64(task_t target, mach_vm_address_t stack,
 	size_t local_stack_size = sizeof(local_stack);
 	err = mach_vm_write(target, (stack - local_stack_size),
 	                    (vm_offset_t)local_stack, local_stack_size);
-	VaccineReturnNegativeTwoOnError(mach_vm_write);
+	VaccineFailOnError(mach_vm_write);
 	// Iinitilize an x86_64 thread state
 	x86_thread_state64_t state;
 	memset(&state, 0, sizeof(state));
@@ -162,7 +163,7 @@ thread_act_t vaccine_thread64(task_t target, mach_vm_address_t stack,
 	uint64_t entrypoint = lorgnette_lookup_image(target, "_pthread_set_self",
 	                                             "libsystem_pthread.dylib");
 	if (entrypoint == 0) err = KERN_FAILURE;
-	VaccineReturnNegativeTwoOnError(entrypoint);
+	VaccineFailOnError(entrypoint);
 	state.__rip = entrypoint;
 	// (RDI) <- dummy pthread struct
 	state.__rdi = dummy;
@@ -172,10 +173,10 @@ thread_act_t vaccine_thread64(task_t target, mach_vm_address_t stack,
 
 	thread_act_t thread;
 	err = thread_create(target, &thread);
-	VaccineReturnNegativeTwoOnError(thread_create);
+	VaccineFailOnError(thread_create);
 	err = thread_set_state(thread, x86_THREAD_STATE64, (thread_state_t)&state,
 	                       x86_THREAD_STATE64_COUNT);
-	VaccineReturnNegativeTwoOnError(thread_set_state);
+	VaccineFailOnError(thread_set_state);
 
 	return thread;
 }
@@ -236,7 +237,7 @@ int64_t thread_get_ax_register(thread_act_t thread, thread_state_flavor_t flavor
 			mach_msg_type_number_t count = x86_THREAD_STATE32_COUNT;
 			err = thread_get_state(thread, x86_THREAD_STATE32,
 			                       (thread_state_t)&state, &count);
-			VaccineReturnNegativeTwoOnError(thread_get_state);
+			VaccineFailOnError(thread_get_state);
 			int32_t tmp = (int32_t)state.__eax;
 			ax = tmp;
 		} else {
@@ -244,7 +245,7 @@ int64_t thread_get_ax_register(thread_act_t thread, thread_state_flavor_t flavor
 			mach_msg_type_number_t count = x86_THREAD_STATE64_COUNT;
 			err = thread_get_state(thread, x86_THREAD_STATE64,
 			                       (thread_state_t)&state, &count);
-			VaccineReturnNegativeTwoOnError(thread_get_state);
+			VaccineFailOnError(thread_get_state);
 			int64_t tmp = (int64_t)state.__rax;
 			ax = tmp;
 		}
@@ -272,21 +273,21 @@ int64_t task_loadlib(task_t target, const char *shared_library_path)
 	mach_vm_address_t remote_path = 0;
 	int err = mach_vm_allocate(target, &remote_path, remote_path_len,
 	                           VM_FLAGS_ANYWHERE);
-	VaccineReturnNegativeTwoOnError(mach_vm_allocate);
+	VaccineFailOnError(mach_vm_allocate);
 	// Copy the payload path string into the target address space
 	err = mach_vm_write(target, remote_path, (vm_offset_t)shared_library_path,
 	                    (mach_msg_type_number_t)remote_path_len);
-	VaccineReturnNegativeTwoOnError(mach_vm_write);
+	VaccineFailOnError(mach_vm_write);
 	// Allocate a remote stack (see kVaccineRemoteStackSize)
 	mach_vm_address_t remote_stack = 0;
 	err = mach_vm_allocate(target, &remote_stack, kVaccineRemoteStackSize,
 	                       VM_FLAGS_ANYWHERE);
-	VaccineReturnNegativeTwoOnError(mach_vm_allocate);
+	VaccineFailOnError(mach_vm_allocate);
 	// Configure a remote thread
 	thread_act_t remote_thread = {0};
 	thread_state_flavor_t flavor = task_thread_flavor(target);
 	if (flavor == -1) err = KERN_FAILURE;
-	VaccineReturnNegativeTwoOnError(task_thread_flavor);
+	VaccineFailOnError(task_thread_flavor);
 
 	if (flavor == x86_THREAD_STATE32) {
 		remote_thread = vaccine_thread32(target, remote_stack, remote_path);
@@ -294,33 +295,33 @@ int64_t task_loadlib(task_t target, const char *shared_library_path)
 		remote_thread = vaccine_thread64(target, remote_stack, remote_path);
 	}
 	if (!remote_thread) err = KERN_FAILURE;
-	VaccineReturnNegativeTwoOnError(task_vaccine_threadXX);
+	VaccineFailOnError(task_vaccine_threadXX);
 
 	// Setup an exception port for the thread
 	mach_port_t exception_port = 0;
 	err = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE,
 	                         &exception_port);
-	VaccineReturnNegativeTwoOnError(mach_port_allocate);
+	VaccineFailOnError(mach_port_allocate);
 	err = mach_port_insert_right(mach_task_self(), exception_port,
                                  exception_port, MACH_MSG_TYPE_MAKE_SEND);
-	VaccineReturnNegativeTwoOnError(mach_port_insert_right);
+	VaccineFailOnError(mach_port_insert_right);
 	err = thread_set_exception_ports(remote_thread, EXC_MASK_BAD_ACCESS,
 	                                 exception_port, EXCEPTION_STATE_IDENTITY,
 	                                 flavor);
-	VaccineReturnNegativeTwoOnError(thread_set_exception_ports);
+	VaccineFailOnError(thread_set_exception_ports);
 
 	err = thread_resume(remote_thread);
-	VaccineReturnNegativeTwoOnError(thread_resume);
+	VaccineFailOnError(thread_resume);
 
 	// Run the exception handling loop
 	int64_t return_value = 0;
 	while (1) {
 		err = vaccine_catch_exception(exception_port);
-		VaccineReturnNegativeTwoOnError(vaccine_catch_exception);
+		VaccineFailOnError(vaccine_catch_exception);
 
 		int suspended = 0;
 		err = thread_was_suspended(remote_thread, &suspended);
-		VaccineReturnNegativeTwoOnError(thread_was_suspended);
+		VaccineFailOnError(thread_was_suspended);
 		if (!suspended) continue;
 
 		// OK, so our remote thread is done and we can grab a dlopen()
@@ -328,13 +329,13 @@ int64_t task_loadlib(task_t target, const char *shared_library_path)
 		return_value = thread_get_ax_register(remote_thread, flavor);
 		// aaaaaand we've done our trip! Let's clean everything up
 		err = thread_terminate(remote_thread);
-		VaccineReturnNegativeTwoOnError(thread_terminate);
+		VaccineFailOnError(thread_terminate);
 		err = mach_vm_deallocate(target, remote_path, remote_path_len);
-		VaccineReturnNegativeTwoOnError(mach_vm_deallocate);
+		VaccineFailOnError(mach_vm_deallocate);
 		err = mach_vm_deallocate(target, remote_stack, kVaccineRemoteStackSize);
-		VaccineReturnNegativeTwoOnError(mach_vm_deallocate);
+		VaccineFailOnError(mach_vm_deallocate);
 		err = mach_port_deallocate(mach_task_self(), exception_port);
-		VaccineReturnNegativeTwoOnError(mach_port_deallocate);
+		VaccineFailOnError(mach_port_deallocate);
 		// bye!
 		break;
 	}
