@@ -56,21 +56,21 @@ thread_state_flavor_t task_thread_flavor(task_t target)
 	if (err != KERN_SUCCESS) return (-1);
 
 	int mib[4] = {
-        CTL_KERN, KERN_PROC, KERN_PROC_PID, pid
-    };
-    struct kinfo_proc info;
-    size_t size = sizeof(info);
+		CTL_KERN, KERN_PROC, KERN_PROC_PID, pid
+	};
+	struct kinfo_proc info;
+	size_t size = sizeof(info);
 
-    err = sysctl(mib, 4, &info, &size, NULL, 0);
-    if (err != KERN_SUCCESS) {
-    	return (-1);
-    }
+	err = sysctl(mib, 4, &info, &size, NULL, 0);
+	if (err != KERN_SUCCESS) {
+		return (-1);
+	}
 
-    if (info.kp_proc.p_flag & P_LP64) {
-    	return x86_THREAD_STATE64;
-    } else {
-    	return x86_THREAD_STATE32;
-    }
+	if (info.kp_proc.p_flag & P_LP64) {
+		return x86_THREAD_STATE64;
+	} else {
+		return x86_THREAD_STATE32;
+	}
 }
 
 /**
@@ -117,9 +117,7 @@ thread_act_t vaccine_thread32(task_t target, mach_vm_address_t stack,
 	if (entrypoint == 0) err = KERN_FAILURE;
 	VaccineReturnNegativeTwoOnError(entrypoint);
 	state.__eip = entrypoint;
-	// (ESP) <- stack pointer
 	state.__esp = stack;
-	// (EBX) <- dlopen_arg
 	state.__ebx = dlopen_arg;
 
 	thread_act_t thread;
@@ -168,10 +166,8 @@ thread_act_t vaccine_thread64(task_t target, mach_vm_address_t stack,
 	state.__rip = entrypoint;
 	// (RDI) <- dummy pthread struct
 	state.__rdi = dummy;
-	// (RSP) <- stack pointer
-	// we simulate a ret instruction, so descrease the stack
+	// we simulate a ret instruction here, so descrease the stack
 	state.__rsp = stack - 8;
-	// (RBX) <- dlopen_arg
 	state.__rbx = dlopen_arg;
 
 	thread_act_t thread;
@@ -272,8 +268,7 @@ int64_t task_loadlib(task_t target, const char *shared_library_path)
 	assert(target), assert(shared_library_path);
 
 	// Allocate enough memory for dlopen()'s first argument
-	size_t remote_path_len = strlen(shared_library_path);
-	remote_path_len += 1; // the terminator, I do remember about you!
+	size_t remote_path_len = strlen(shared_library_path) + 1;
 	mach_vm_address_t remote_path = 0;
 	int err = mach_vm_allocate(target, &remote_path, remote_path_len,
 	                           VM_FLAGS_ANYWHERE);
@@ -322,6 +317,7 @@ int64_t task_loadlib(task_t target, const char *shared_library_path)
 	while (1) {
 		err = vaccine_catch_exception(exception_port);
 		VaccineReturnNegativeTwoOnError(vaccine_catch_exception);
+
 		int suspended = 0;
 		err = thread_was_suspended(remote_thread, &suspended);
 		VaccineReturnNegativeTwoOnError(thread_was_suspended);
@@ -367,7 +363,7 @@ kern_return_t task_vaccine(task_t target, const char *payload_path)
 	if (return_value > 0) {
 		return KERN_SUCCESS;
 	} else if (return_value == 0) {
-		// dlopen() retruns zero when it can't load a library
+		// dlopen() returns zero when it can't load a library
 		return KERN_INVALID_TASK;
 	}
 
@@ -403,6 +399,7 @@ kern_return_t catch_i386_exception(task_t task, mach_port_t thread,
 		return MIG_NO_REPLY;
 	} else if (in_state->__eip != kVaccineJumpToDlopenReturnValue) {
 		// Oops, we broke something up
+		// TODO: softly terminate the thread here
 		return KERN_FAILURE;
 	}
 	// Well, setup a thread to execute dlopen() with a given library path
@@ -410,10 +407,9 @@ kern_return_t catch_i386_exception(task_t task, mach_port_t thread,
 	uint32_t dlopen_addr = lorgnette_lookup(task, "dlopen");
 	out_state->__eip = dlopen_addr;
 	out_state->__esp = ({
-		// Our previous function added 4 to our stck pointer, discard this
+		// Our previous function added 4 to our stack pointer, discard this
 		mach_vm_address_t stack = in_state->__esp - (sizeof(uint32_t));
-		// simulate the call instruction
-		stack -= 4;
+		stack -= 4; // simulate the call instruction
 		int mode = RTLD_NOW | RTLD_LOCAL;
 		uint32_t local_stack[] = {
 			kVaccineFinishReturnValue,
@@ -458,7 +454,8 @@ kern_return_t catch_x86_64_exception(task_t task, mach_port_t thread,
 	out_state->__rsi = RTLD_NOW | RTLD_LOCAL;
 	out_state->__rdi = in_state->__rbx; // we hold a library path here
 	out_state->__rsp = ({
-		mach_vm_address_t stack = in_state->__rsp - 8;
+		mach_vm_address_t stack = in_state->__rsp;
+		stack -= 8; // simulate the call instruction
 		vm_offset_t new_ret_value_ptr = (vm_offset_t)&(uint64_t){
 			kVaccineFinishReturnValue
 		};
@@ -509,6 +506,6 @@ catch_exception_raise_state_identity(mach_port_t exception_port,
 		return catch_i386_exception(task, thread, in_state32, out_state32);
 	}
 
-	// Don't care about non-Intel. Let the kernel handle it.
+	// It's not i386 nor x86_64 so we have nothing to do with it
 	return KERN_FAILURE;
 }
