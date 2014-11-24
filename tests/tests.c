@@ -5,6 +5,7 @@
 #include "../task_vaccine.h"
 #include "../submodules/Cegta/Cegta.h"
 
+#define kTargetInitializationTimeMSec 300000
 
 SpecBegin(task_vaccine)
 
@@ -17,7 +18,7 @@ task_t (^_launch_target)(const char *) = ^(const char *target) {
 		        target, strerror(errno));
 		exit(EXIT_FAILURE);
 	} else {
-		usleep(60000); // let it initialize a bit
+		usleep(kTargetInitializationTimeMSec); // let it initialize a bit
 		int err = task_for_pid(mach_task_self(), pid, &task);
 		assert(err == KERN_SUCCESS);
 	}
