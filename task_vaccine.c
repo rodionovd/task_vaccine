@@ -399,9 +399,8 @@ kern_return_t catch_i386_exception(task_t task, mach_port_t thread,
 		thread_suspend(thread);
 		return MIG_NO_REPLY;
 	} else if (in_state->__eip != kVaccineJumpToDlopenReturnValue) {
-		// Oops, we broke something up
-		// TODO: softly terminate the thread here
-		return KERN_FAILURE;
+		// Oops, we broke something up, notify a user
+		goto error;
 	}
 	// Well, setup a thread to execute dlopen() with a given library path
 	memcpy(out_state, in_state, sizeof(*in_state));
@@ -421,12 +420,22 @@ kern_return_t catch_i386_exception(task_t task, mach_port_t thread,
 		if (err != KERN_SUCCESS) {
 			syslog(LOG_NOTICE, "[%d] mach_vm_write() failed: %d (%s)\n",
 			                   __LINE__-4, err, mach_error_string(err));
-			return KERN_FAILURE;
+			goto error;
 		}
 		stack;
 	});
 
 	return KERN_SUCCESS;
+
+error:
+	memset(out_state, 0, sizeof(*out_state));
+	out_state->__eax = (0);
+	// Since we return MIG_NO_REPLY the kernel won't update the thread's
+	// state, so we have to do it manually
+	thread_set_state(thread, x86_THREAD_STATE32, (thread_state_t)out_state,
+	                 x86_THREAD_STATE32_COUNT);
+	thread_suspend(thread);
+	return MIG_NO_REPLY;
 }
 
 /**
@@ -444,8 +453,8 @@ kern_return_t catch_x86_64_exception(task_t task, mach_port_t thread,
 		thread_suspend(thread);
 		return MIG_NO_REPLY;
 	} else if (in_state->__rip != kVaccineJumpToDlopenReturnValue) {
-		// Oops, we broke something up
-		return KERN_FAILURE;
+		// Oops, we broke something up, notify a user
+		goto error;
 	}
 	// Well, setup a thread to execute dlopen() with a given library path
 	memcpy(out_state, in_state, sizeof(*in_state));
@@ -464,12 +473,22 @@ kern_return_t catch_x86_64_exception(task_t task, mach_port_t thread,
 		if (err != KERN_SUCCESS) {
 			syslog(LOG_NOTICE, "[%d] mach_vm_write() failed: %d (%s)\n",
 			                   __LINE__-5, err, mach_error_string(err));
-			return KERN_FAILURE;
+			goto error;
 		}
 		stack;
 	});
 
 	return KERN_SUCCESS;
+
+error:
+	memset(out_state, 0, sizeof(*out_state));
+	out_state->__rax = (0);
+	// Since we return MIG_NO_REPLY the kernel won't update the thread's
+	// state, so we have to do it manually
+	thread_set_state(thread, x86_THREAD_STATE64, (thread_state_t)out_state,
+	                 x86_THREAD_STATE64_COUNT);
+	thread_suspend(thread);
+	return MIG_NO_REPLY;
 }
 
 /**
