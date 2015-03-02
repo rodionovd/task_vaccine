@@ -99,4 +99,4 @@ describe("x86_64 target",^{
 SpecEnd()
 
 
-CegtaRun();
+CegtaMain();
